@@ -142,6 +142,7 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
                         ls['text'] = 'ls'
             if entry.get('TerraformState', False) or (entry.get('PlanetClass', False)):
                 mapped = entry.get('WasMapped')
+                # TODO: Clean up repetitive code - perhaps integrate Journal types into WORLDS constant?
                 if not mapped:
                     if entry.get('TerraformState') == 'Terraformable':
                         this.scanned_worlds['terraformable'].add(entry.get('BodyName'))
@@ -156,19 +157,19 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
                 else:
                     if entry.get('TerraformState') == 'Terraformable':
                         this.scanned_worlds['terraformable'].discard(entry.get('BodyName'))
-                        this.scanned_worlds['terraformable'].add('#' + entry.get('BodyName') + '#')
+                        this.scanned_worlds['terraformable'].add(entry.get('BodyName') + '!')
                     elif entry.get('PlanetClass') == 'Earthlike body':
                         this.scanned_worlds['Earth-like world'].discard(entry.get('BodyName'))
-                        this.scanned_worlds['Earth-like world'].add('#' + entry.get('BodyName') + '#')
+                        this.scanned_worlds['Earth-like world'].add(entry.get('BodyName') + '!')
                     elif entry.get('PlanetClass') == 'Water world':
                         this.scanned_worlds['Water world'].discard(entry.get('BodyName'))
-                        this.scanned_worlds['Water world'].add('#' + entry.get('BodyName') + '#')
+                        this.scanned_worlds['Water world'].add(entry.get('BodyName') + '!')
                     elif entry.get('PlanetClass') == 'Ammonia world':
                         this.scanned_worlds['Ammonia world'].discard(entry.get('BodyName'))
-                        this.scanned_worlds['Ammonia world'].add('#' + entry.get('BodyName') + '#')
+                        this.scanned_worlds['Ammonia world'].add(entry.get('BodyName') + '!')
                     elif entry.get('PlanetClass') == 'Metal rich body':
                         this.scanned_worlds['Metal-rich body'].discard(entry.get('BodyName'))
-                        this.scanned_worlds['Metal-rich body'].add('#' + entry.get('BodyName') + '#')
+                        this.scanned_worlds['Metal-rich body'].add(entry.get('BodyName') + '!')
                 systemName = entry.get('StarSystem')
                 for i in range(len(WORLDS)):
                     (name, high, low, subType) = WORLDS[i]
