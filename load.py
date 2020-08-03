@@ -47,6 +47,7 @@ LS = 300000000.0	# 1 ls in m (approx)
 this = sys.modules[__name__]	# For holding module globals
 this.frame = None
 this.worlds = []
+this.scanned_worlds = defaultdict(set)
 this.edsm_session = None
 this.edsm_data = None
 
@@ -123,7 +124,7 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
                 t = float(entry['SurfaceTemperature'])
                 for i in range(len(WORLDS)):
                     (name, high, low, subType) = WORLDS[i]
-                    (label, edsm, near, dash, far, ls) = this.worlds[i]
+                    (label, edsm, near, dash, far, ls, data) = this.worlds[i]
                     far_dist = int(0.5 + dfort(r, t, low))
                     radius = int(0.5 + r / LS)
                     if far_dist <= radius:
@@ -139,6 +140,23 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
                         dash['text'] = '-'
                         far['text'] = Locale.stringFromNumber(far_dist)
                         ls['text'] = 'ls'
+            if entry.get('ScanType') == 'Detailed' or entry.get('ScanType') == 'NavBeaconDetail':
+                if entry.get('TerraformState') == 'Terraformable':
+                    this.scanned_worlds['terraformable'].add(entry.get('BodyName'))
+                elif entry.get('PlanetClass') == 'Earthlike body':
+                    this.scanned_worlds['Earth-like world'].add(entry.get('BodyName'))
+                elif entry.get('PlanetClass') == 'Water world':
+                    this.scanned_worlds['Water world'].add(entry.get('BodyName'))
+                elif entry.get('PlanetClass') == 'Ammonia world':
+                    this.scanned_worlds['Ammonia world'].add(entry.get('BodyName'))
+                elif entry.get('PlanetClass') == 'Metal rich body':
+                    this.scanned_worlds['Metal-rich body'].add(entry.get('BodyName'))
+                systemName = entry.get('StarSystem')
+                for i in range(len(WORLDS)):
+                    (name, high, low, subType) = WORLDS[i]
+                    (label, edsm, near, dash, far, ls) = this.worlds[i]
+                    edsm['text'] = ' '.join([x[len(systemName):].replace(' ', '') if x.startswith(systemName) else x for x in this.scanned_worlds[subType]])
+                
         except:
             for (label, edsm, near, dash, far, ls) in this.worlds:
                 near['text'] = ''
@@ -154,6 +172,7 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
             dash['text'] = ''
             far['text'] = ''
             ls['text'] = ''
+            data = {}
 
     if entry['event'] in ['Location', 'FSDJump'] and get_setting() & SETTING_EDSM:
         thread = threading.Thread(target = edsm_worker, name = 'EDSM worker', args = (entry['StarSystem'],))
@@ -204,12 +223,11 @@ def edsm_data(event):
         return
 
     # Collate
-    bodies = defaultdict(list)
     for body in this.edsm_data.get('bodies', []):
         if body.get('terraformingState') == 'Candidate for terraforming':
-            bodies['terraformable'].append(body['name'])
+            this.scanned_worlds['terraformable'].append(body['name'])
         else:
-            bodies[body['subType']].append(body['name'])
+            this.scanned_worlds[body['subType']].append(body['name'])
 
     # Display
     systemName = this.edsm_data.get('name', '')
@@ -217,8 +235,8 @@ def edsm_data(event):
     for i in range(len(WORLDS)):
         (name, high, low, subType) = WORLDS[i]
         (label, edsm, near, dash, far, ls) = this.worlds[i]
-        edsm['text'] = ' '.join([x[len(systemName):].replace(' ', '') if x.startswith(systemName) else x for x in bodies[subType]])
-        edsm['url'] = len(bodies[subType]) == 1 and 'https://www.edsm.net/show-system?systemName=%s&bodyName=%s' % (quote(systemName), quote(bodies[subType][0])) or url
+        edsm['text'] = ' '.join([x[len(systemName):].replace(' ', '') if x.startswith(systemName) else x for x in this.scanned_worlds[subType]])
+        edsm['url'] = len(this.scanned_worlds[subType]) == 1 and 'https://www.edsm.net/show-system?systemName=%s&bodyName=%s' % (quote(systemName), quote(this.scanned_worlds[subType][0])) or url
 
 
 def get_setting():
