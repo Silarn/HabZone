@@ -9,6 +9,7 @@ from collections import defaultdict
 import requests
 import sys
 import threading
+import json
 try:
     # Python 2
     from urllib2 import quote
@@ -39,6 +40,7 @@ WORLDS = [
     ('Earth-Like',    278.0, 227.0, 'Earth-like world'),
     ('Water',         307.0, 156.0, 'Water world'),
     ('Ammonia',       193.0, 117.0, 'Ammonia world'),
+    ('Class II Giant', 250.0, 150.0, 'Class II gas giant'),
     ('Terraformable', 315.0, 223.0, 'terraformable'),
 ]
 
@@ -47,7 +49,7 @@ LS = 300000000.0	# 1 ls in m (approx)
 this = sys.modules[__name__]	# For holding module globals
 this.frame = None
 this.worlds = []
-this.scanned_worlds = defaultdict(set)
+this.scanned_worlds = {'system': None, 'bodies': {}}
 this.edsm_session = None
 this.edsm_data = None
 
@@ -143,38 +145,25 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
             if entry.get('TerraformState', False) or (entry.get('PlanetClass', False)):
                 mapped = entry.get('WasMapped')
                 # TODO: Clean up repetitive code - perhaps integrate Journal types into WORLDS constant?
-                if not mapped:
-                    if entry.get('TerraformState') == 'Terraformable':
-                        this.scanned_worlds['terraformable'].add(entry.get('BodyName'))
-                    elif entry.get('PlanetClass') == 'Earthlike body':
-                        this.scanned_worlds['Earth-like world'].add(entry.get('BodyName'))
-                    elif entry.get('PlanetClass') == 'Water world':
-                        this.scanned_worlds['Water world'].add(entry.get('BodyName'))
-                    elif entry.get('PlanetClass') == 'Ammonia world':
-                        this.scanned_worlds['Ammonia world'].add(entry.get('BodyName'))
-                    elif entry.get('PlanetClass') == 'Metal rich body':
-                        this.scanned_worlds['Metal-rich body'].add(entry.get('BodyName'))
-                else:
-                    if entry.get('TerraformState') == 'Terraformable':
-                        this.scanned_worlds['terraformable'].discard(entry.get('BodyName'))
-                        this.scanned_worlds['terraformable'].add(entry.get('BodyName') + '!')
-                    elif entry.get('PlanetClass') == 'Earthlike body':
-                        this.scanned_worlds['Earth-like world'].discard(entry.get('BodyName'))
-                        this.scanned_worlds['Earth-like world'].add(entry.get('BodyName') + '!')
-                    elif entry.get('PlanetClass') == 'Water world':
-                        this.scanned_worlds['Water world'].discard(entry.get('BodyName'))
-                        this.scanned_worlds['Water world'].add(entry.get('BodyName') + '!')
-                    elif entry.get('PlanetClass') == 'Ammonia world':
-                        this.scanned_worlds['Ammonia world'].discard(entry.get('BodyName'))
-                        this.scanned_worlds['Ammonia world'].add(entry.get('BodyName') + '!')
-                    elif entry.get('PlanetClass') == 'Metal rich body':
-                        this.scanned_worlds['Metal-rich body'].discard(entry.get('BodyName'))
-                        this.scanned_worlds['Metal-rich body'].add(entry.get('BodyName') + '!')
-                systemName = entry.get('StarSystem')
-                for i in range(len(WORLDS)):
-                    (name, high, low, subType) = WORLDS[i]
-                    (label, edsm, near, dash, far, ls) = this.worlds[i]
-                    edsm['text'] = ' '.join([x[len(systemName):].replace(' ', '') if x.startswith(systemName) else x for x in sorted(this.scanned_worlds[subType])])
+                body_type = None
+                if entry.get('TerraformState') == 'Terraformable':
+                    body_type = 'terraformable'
+                elif entry.get('PlanetClass') == 'Earthlike body':
+                    body_type = 'Earth-like world'
+                elif entry.get('PlanetClass') == 'Water world':
+                    body_type = 'Water world'
+                elif entry.get('PlanetClass') == 'Ammonia world':
+                    body_type = 'Ammonia world'
+                elif entry.get('PlanetClass') == 'Metal rich body':
+                    body_type = 'Metal-rich body'
+                elif entry.get('PlanetClass') == 'Sudarsky class II gas giant':
+                    body_type = 'Class II gas giant'
+                if body_type:
+                    data = this.scanned_worlds['bodies'].get(entry.get('BodyName'), {})
+                    data.update({'type': body_type, 'was_mapped': mapped})
+                    this.scanned_worlds['bodies'][entry.get('BodyName')] = data
+                    print('Adding: ' + json.dumps(this.scanned_worlds['bodies'][entry.get('BodyName')], indent=2))
+                list_bodies(system)
         except (RuntimeError, TypeError) as err:
             for (label, edsm, near, dash, far, ls) in this.worlds:
                 near['text'] = ''
@@ -191,7 +180,16 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
             dash['text'] = ''
             far['text'] = ''
             ls['text'] = ''
-        this.scanned_worlds = defaultdict(set)
+        this.scanned_worlds['system'] = entry['StarSystem']
+        this.scanned_worlds['bodies'].clear()
+
+    if entry['event'] == 'SAAScanComplete':
+        for name in this.scanned_worlds['bodies']:
+            print('Scan Name: ' + name + ' | ' + entry['BodyName'])
+            if name == entry['BodyName']:
+                this.scanned_worlds['bodies'][name].update({'mapped': True})
+                print('Mapped: ' + json.dumps(this.scanned_worlds['bodies'][name], indent=2))
+        list_bodies(system)
 
     if entry['event'] in ['Location', 'FSDJump'] and get_setting() & SETTING_EDSM:
         thread = threading.Thread(target = edsm_worker, name = 'EDSM worker', args = (entry['StarSystem'],))
@@ -211,6 +209,26 @@ def cmdr_data(data, is_beta):
 # From Jackie Silver's Hab-Zone Calculator https://forums.frontier.co.uk/showthread.php?p=5452081
 def dfort(r, t, target):
     return (((r ** 2) * (t ** 4) / (4 * (target ** 4))) ** 0.5) / LS
+
+
+def list_bodies(system):
+    print(json.dumps(this.scanned_worlds))
+    body_data = {}
+    for name in this.scanned_worlds['bodies']:
+        if this.scanned_worlds['bodies'][name].get('type', False):
+            final_name = name
+            if this.scanned_worlds['bodies'][name].get('was_mapped', False):
+                final_name += u'⍻'
+            elif this.scanned_worlds['bodies'][name].get('mapped', False):
+                final_name += u'🗸'
+            data = body_data.get(this.scanned_worlds['bodies'][name]['type'], [])
+            data.append(final_name)
+            body_data[this.scanned_worlds['bodies'][name]['type']] = data
+    for i in range(len(WORLDS)):
+        (name, high, low, subType) = WORLDS[i]
+        (label, edsm, near, dash, far, ls) = this.worlds[i]
+        edsm['text'] = ' '.join([x[len(system):].replace(' ', '') if x.startswith(system) else '' for x in
+                                 sorted(body_data.get(subType, []))])
 
 
 # EDSM lookup
@@ -244,9 +262,13 @@ def edsm_data(event):
     # Collate
     for body in this.edsm_data.get('bodies', []):
         if body.get('terraformingState') == 'Candidate for terraforming':
-            this.scanned_worlds['terraformable'].add(body['name'])
+            data = this.scanned_worlds['bodies'].get(body['name'], {})
+            data.update({'type': 'terraformable'})
+            this.scanned_worlds['bodies'][body['name']] = data
         else:
-            this.scanned_worlds[body['subType']].add(body['name'])
+            data = this.scanned_worlds['bodies'].get(body['name'], {})
+            data.update({'type': body['subType']})
+            this.scanned_worlds['bodies'][body['name']] = data
 
     # Display
     systemName = this.edsm_data.get('name', '')
@@ -254,8 +276,9 @@ def edsm_data(event):
     for i in range(len(WORLDS)):
         (name, high, low, subType) = WORLDS[i]
         (label, edsm, near, dash, far, ls) = this.worlds[i]
-        edsm['text'] = ' '.join([x[len(systemName):].replace(' ', '') if x.startswith(systemName) else x for x in sorted(this.scanned_worlds[subType])])
-        edsm['url'] = len(this.scanned_worlds[subType]) == 1 and 'https://www.edsm.net/show-system?systemName=%s&bodyName=%s' % (quote(systemName), quote(this.scanned_worlds[subType][0])) or url
+        list_bodies(systemName)
+        edsm['url'] = url
+        #edsm['url'] = len(this.scanned_worlds[subType]) == 1 and 'https://www.edsm.net/show-system?systemName=%s&bodyName=%s' % (quote(systemName), quote(this.scanned_worlds[subType][0])) or url
 
 
 def get_setting():
@@ -290,4 +313,3 @@ def update_visibility():
         this.spacer.grid_remove()
     else:
         this.spacer.grid(row = 0)
-
