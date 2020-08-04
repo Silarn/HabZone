@@ -9,7 +9,6 @@ from collections import defaultdict
 import requests
 import sys
 import threading
-import json
 try:
     # Python 2
     from urllib2 import quote
@@ -162,7 +161,6 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
                     data = this.scanned_worlds['bodies'].get(entry.get('BodyName'), {})
                     data.update({'type': body_type, 'was_mapped': mapped})
                     this.scanned_worlds['bodies'][entry.get('BodyName')] = data
-                    print('Adding: ' + json.dumps(this.scanned_worlds['bodies'][entry.get('BodyName')], indent=2))
                 list_bodies(system)
         except (RuntimeError, TypeError) as err:
             for (label, edsm, near, dash, far, ls) in this.worlds:
@@ -188,7 +186,6 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
             print('Scan Name: ' + name + ' | ' + entry['BodyName'])
             if name == entry['BodyName']:
                 this.scanned_worlds['bodies'][name].update({'mapped': True})
-                print('Mapped: ' + json.dumps(this.scanned_worlds['bodies'][name], indent=2))
         list_bodies(system)
 
     if entry['event'] in ['Location', 'FSDJump'] and get_setting() & SETTING_EDSM:
@@ -212,7 +209,6 @@ def dfort(r, t, target):
 
 
 def list_bodies(system):
-    print(json.dumps(this.scanned_worlds))
     body_data = {}
     for name in this.scanned_worlds['bodies']:
         if this.scanned_worlds['bodies'][name].get('type', False):
