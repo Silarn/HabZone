@@ -9,14 +9,8 @@ from collections import defaultdict
 import requests
 import sys
 import threading
-try:
-    # Python 2
-    from urllib2 import quote
-    import Tkinter as tk
-except ModuleNotFoundError:
-    # Python 3
-    from urllib.parse import quote
-    import tkinter as tk
+from urllib.parse import quote
+import tkinter as tk
 
 from ttkHyperlinkLabel import HyperlinkLabel
 import myNotebook as nb
@@ -29,23 +23,24 @@ from l10n import Locale
 
 VERSION = '1.20'
 
-SETTING_DEFAULT = 0x0002	# Earth-like
+SETTING_DEFAULT = 0x0002  # Earth-like
 SETTING_EDSM    = 0x1000
 SETTING_NONE    = 0xffff
 
 WORLDS = [
-    # Type    Black-body temp range  EDSM description
-    ('Metal-Rich',      0,  1103.0, 'Metal-rich body'),
-    ('Earth-Like',    278.0, 227.0, 'Earth-like world'),
-    ('Water',         307.0, 156.0, 'Water world'),
-    ('Ammonia',       193.0, 117.0, 'Ammonia world'),
-    ('Class II Giant', 250.0, 150.0, 'Class II gas giant'),
-    ('Terraformable', 315.0, 223.0, 'terraformable'),
+    # Type      Black-body temp range   EDSM description
+    ('Metal-Rich',         0, 1103.0, 'Metal-rich body'),
+    ('Earth-Like',     278.0,  227.0, 'Earth-like world'),
+    ('Water',          307.0,  156.0, 'Water world'),
+    ('Ammonia',        193.0,  117.0, 'Ammonia world'),
+    ('Class II Giant', 250.0,  150.0, 'Class II gas giant'),
+    ('Terraformable',  318.0,  223.0, 'terraformable'),
+    ('Organic',        500.0,  200.0, 'Organic POI'),
 ]
 
-LS = 300000000.0	# 1 ls in m (approx)
+LS = 300000000.0  # 1 ls in m (approx)
 
-this = sys.modules[__name__]	# For holding module globals
+this = sys.modules[__name__]  # For holding module globals
 this.frame = None
 this.worlds = []
 this.scanned_worlds = {'system': None, 'bodies': {}}
@@ -56,30 +51,47 @@ this.edsm_data = None
 this.settings = None
 this.edsm_setting = None
 
+this.istar = 0
+this.stars = defaultdict(list)
+this.bodies = defaultdict(list)
+
 
 def plugin_start3(plugin_dir):
     return plugin_start()
+
 
 def plugin_start():
     # App isn't initialised at this point so can't do anything interesting
     return 'HabZone'
 
+
 def plugin_app(parent):
     # Create and display widgets
     this.frame = tk.Frame(parent)
-    this.frame.columnconfigure(3, weight=1)
-    this.frame.bind('<<HabZoneData>>', edsm_data)	# callback when EDSM data received
+    this.frame.columnconfigure(6, weight=1)
+    this.frame.bind('<<HabZoneData>>', edsm_data)   # callback when EDSM data received
+    this.starused_label = tk.Label(this.frame, text = 'Star used: [0]')
+    this.starused = HyperlinkLabel(this.frame)
+    this.starused_next = HyperlinkLabel(this.frame)
+    this.starused_next['text'] = '>'
+    this.starused_next['url'] = '>'
+    this.starused_next.bind("<Button-1>", next_star)
+    this.starused_prev = HyperlinkLabel(this.frame)
+    this.starused_prev['text'] = '<'
+    this.starused_prev['url'] = '<'
+    this.starused_prev.bind("<Button-1>", prev_star)
     for (name, high, low, subType) in WORLDS:
         this.worlds.append((tk.Label(this.frame, text = name + ':'),
-                            HyperlinkLabel(this.frame, wraplength=100),	# edsm
-                            tk.Label(this.frame),	# near
-                            tk.Label(this.frame),	# dash
-                            tk.Label(this.frame),	# far
-                            tk.Label(this.frame),	# ls
+                            HyperlinkLabel(this.frame, wraplength=100), # edsm
+                            tk.Label(this.frame),   # near
+                            tk.Label(this.frame),   # dash
+                            tk.Label(this.frame),   # far
+                            tk.Label(this.frame),   # ls
                             ))
-    this.spacer = tk.Frame(this.frame)	# Main frame can't be empty or it doesn't resize
+    this.spacer = tk.Frame(this.frame)  # Main frame can't be empty or it doesn't resize
     update_visibility()
     return this.frame
+
 
 def plugin_prefs(parent, cmdr, is_beta):
     frame = nb.Frame(parent)
@@ -102,6 +114,7 @@ def plugin_prefs(parent, cmdr, is_beta):
 
     return frame
 
+
 def prefs_changed(cmdr, is_beta):
     row = 1
     setting = 0
@@ -117,60 +130,58 @@ def prefs_changed(cmdr, is_beta):
 
 
 def journal_entry(cmdr, is_beta, system, station, entry, state):
-
+    if not this.scanned_worlds.get('system'):
+        this.scanned_worlds['system'] = system
     if entry['event'] == 'Scan':
-        try:
-            if not float(entry['DistanceFromArrivalLS']):	# Only calculate for arrival star
-                r = float(entry['Radius'])
-                t = float(entry['SurfaceTemperature'])
-                for i in range(len(WORLDS)):
-                    (name, high, low, subType) = WORLDS[i]
-                    (label, edsm, near, dash, far, ls) = this.worlds[i]
-                    far_dist = int(0.5 + dfort(r, t, low))
-                    radius = int(0.5 + r / LS)
-                    if far_dist <= radius:
-                        near['text'] = ''
-                        dash['text'] = u'×'
-                        far['text'] = ''
-                        ls['text'] = ''
-                    else:
-                        if not high:
-                            near['text'] = Locale.stringFromNumber(radius)
-                        else:
-                            near['text'] = Locale.stringFromNumber(int(0.5 + dfort(r, t, high)))
-                        dash['text'] = '-'
-                        far['text'] = Locale.stringFromNumber(far_dist)
-                        ls['text'] = 'ls'
-            if entry.get('TerraformState', False) or (entry.get('PlanetClass', False)):
-                mapped = entry.get('WasMapped')
-                # TODO: Clean up repetitive code - perhaps integrate Journal types into WORLDS constant?
-                body_type = None
-                if entry.get('TerraformState') == 'Terraformable':
-                    body_type = 'terraformable'
-                elif entry.get('PlanetClass') == 'Earthlike body':
-                    body_type = 'Earth-like world'
-                elif entry.get('PlanetClass') == 'Water world':
-                    body_type = 'Water world'
-                elif entry.get('PlanetClass') == 'Ammonia world':
-                    body_type = 'Ammonia world'
-                elif entry.get('PlanetClass') == 'Metal rich body':
-                    body_type = 'Metal-rich body'
-                elif entry.get('PlanetClass') == 'Sudarsky class II gas giant':
-                    body_type = 'Class II gas giant'
-                if body_type:
-                    data = this.scanned_worlds['bodies'].get(entry.get('BodyName'), {})
-                    data.update({'type': body_type, 'was_mapped': mapped})
-                    this.scanned_worlds['bodies'][entry.get('BodyName')] = data
-                list_bodies(system)
-        except (RuntimeError, TypeError) as err:
-            for (label, edsm, near, dash, far, ls) in this.worlds:
-                near['text'] = ''
-                dash['text'] = ''
-                far['text'] = ''
-                ls['text'] = '?'
-                edsm['test'] = err
+        if 'StarType' in entry:
+            r = float(entry['Radius'])
+            t = float(entry['SurfaceTemperature'])
+            if not entry['BodyName'] in this.stars['name']:
+                this.stars['name'].append(entry['BodyName'])
+                this.stars['surfaceTemperature'].append(t)
+                this.stars['solarRadius'].append(r)
+                this.starused_label['text'] = 'Star used: ['+str(this.istar+1)+'/'+str(len(this.stars['name']))+']'
+            updateValues(r,t,entry['BodyName'])
 
-    elif entry['event'] == 'FSDJump':
+        if 'PlanetClass' in entry:
+            for i in range(len(WORLDS)):
+                (name, high, low, subType) = WORLDS[i]
+                (label, edsm, near, dash, far, ls) = this.worlds[i]
+                if entry['PlanetClass'][0:5] == subType[0:5]:
+                    if not entry['BodyName'] in this.bodies[subType]:
+                        this.bodies[subType].append(entry['BodyName'])
+                edsm['text'] = ' '.join([x[len(this.systemName):].replace(' ', '') if x.startswith(this.systemName) else x for x in this.bodies[subType]])
+                edsm['url'] = len(this.bodies[subType]) == 1 and 'https://www.edsm.net/show-system?systemName=%s&bodyName=%s' % (quote(this.systemName), quote(this.bodies[subType][0]))
+
+        if entry.get('TerraformState', False) or (entry.get('PlanetClass', False)):
+            mapped = entry.get('WasMapped')
+            # TODO: Clean up repetitive code - perhaps integrate Journal types into WORLDS constant?
+            body_type = None
+            if entry.get('TerraformState') == 'Terraformable':
+                body_type = 'terraformable'
+            elif entry.get('PlanetClass') == 'Earthlike body':
+                body_type = 'Earth-like world'
+            elif entry.get('PlanetClass') == 'Water world':
+                body_type = 'Water world'
+            elif entry.get('PlanetClass') == 'Ammonia world':
+                body_type = 'Ammonia world'
+            elif entry.get('PlanetClass') == 'Metal rich body':
+                body_type = 'Metal-rich body'
+            elif entry.get('PlanetClass') == 'Sudarsky class II gas giant':
+                body_type = 'Class II gas giant'
+            if body_type:
+                data = this.scanned_worlds['bodies'].get(entry.get('BodyName'), {})
+                data.update({'type': body_type, 'was_mapped': mapped})
+                this.scanned_worlds['bodies'][entry.get('BodyName')] = data
+            list_bodies(system)
+
+    if entry['event'] in ['Location', 'FSDJump', 'StartUp']:
+        this.istar = 0
+        this.stars = defaultdict(list)
+        this.bodies = defaultdict(list)
+        this.starused_label['text'] = 'Star used: [0]'
+        this.starused['text'] = ''
+        this.starused['url'] = ''
         for (label, edsm, near, dash, far, ls) in this.worlds:
             edsm['text'] = ''
             edsm['url'] = ''
@@ -178,6 +189,7 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
             dash['text'] = ''
             far['text'] = ''
             ls['text'] = ''
+        this.systemName = entry['StarSystem']
         this.scanned_worlds['system'] = entry['StarSystem']
         this.scanned_worlds['bodies'].clear()
 
@@ -188,13 +200,29 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
                 this.scanned_worlds['bodies'][name].update({'mapped': True})
         list_bodies(system)
 
-    if entry['event'] in ['Location', 'FSDJump'] and get_setting() & SETTING_EDSM:
-        thread = threading.Thread(target = edsm_worker, name = 'EDSM worker', args = (entry['StarSystem'],))
+    if entry['event'] in ['Location', 'FSDJump', 'StartUp'] and get_setting() & SETTING_EDSM:
+        thread = threading.Thread(target = edsm_worker, name = 'EDSM worker', args = (this.systemName,))
         thread.daemon = True
         thread.start()
 
 
 def cmdr_data(data, is_beta):
+
+    this.istar = 0
+    this.stars = defaultdict(list)
+    this.bodies = defaultdict(list)
+    this.starused_label['text'] = 'Star used: [0]'
+    this.starused['text'] = ''
+    this.starused['url'] = ''
+
+    for (label, edsm, near, dash, far, ls) in this.worlds:
+        edsm['text'] = ''
+        edsm['url'] = ''
+        near['text'] = ''
+        dash['text'] = ''
+        far['text'] = ''
+        ls['text'] = ''
+
     # Manual Update
     if get_setting() & SETTING_EDSM and not data['commander']['docked']:
         thread = threading.Thread(target = edsm_worker, name = 'EDSM worker', args = (data['lastSystem']['name'],))
@@ -206,6 +234,30 @@ def cmdr_data(data, is_beta):
 # From Jackie Silver's Hab-Zone Calculator https://forums.frontier.co.uk/showthread.php?p=5452081
 def dfort(r, t, target):
     return (((r ** 2) * (t ** 4) / (4 * (target ** 4))) ** 0.5) / LS
+
+
+def updateValues(r,t,name):
+    this.starused['text'] = name
+    this.starused['url'] = 'https://www.edsm.net/show-system?systemName=%s&bodyName=%s' % (quote(this.systemName), quote(name))
+    for i in range(len(WORLDS)):
+        (name, high, low, subType) = WORLDS[i]
+        (label, edsm, near, dash, far, ls) = this.worlds[i]
+        far_dist = int(0.5 + dfort(r, t, low))
+        radius = int(0.5 + r / LS)
+        if far_dist <= radius:
+            near['text'] = ''
+            dash['text'] = u'×'
+            far['text'] = ''
+            ls['text'] = ''
+        else:
+            if not high:
+                near['text'] = Locale.stringFromNumber(radius)
+            else:
+                near['text'] = Locale.stringFromNumber(int(0.5 + dfort(r, t, high)))
+            dash['text'] = '-'
+            far['text'] = Locale.stringFromNumber(far_dist)
+            ls['text'] = 'ls'
+    return 0
 
 
 def list_bodies(system):
@@ -236,7 +288,7 @@ def edsm_worker(systemName):
     try:
         r = this.edsm_session.get('https://www.edsm.net/api-system-v1/bodies?systemName=%s' % quote(systemName), timeout=10)
         r.raise_for_status()
-        this.edsm_data = r.json() or {}	# Unknown system represented as empty list
+        this.edsm_data = r.json() or {} # Unknown system represented as empty list
     except:
         this.edsm_data = None
 
@@ -257,6 +309,13 @@ def edsm_data(event):
 
     # Collate
     for body in this.edsm_data.get('bodies', []):
+        if body['type'] == 'Star':
+            if body['name'] not in this.stars['name']:
+                this.stars['name'].append(body['name'])
+                this.stars['surfaceTemperature'].append(body['surfaceTemperature'])
+                this.stars['solarRadius'].append(body['solarRadius']*695500000)
+
+        this.bodies[body['subType']].append(body['name'])
         if body.get('terraformingState') == 'Candidate for terraforming':
             data = this.scanned_worlds['bodies'].get(body['name'], {})
             data.update({'type': 'terraformable'})
@@ -266,8 +325,12 @@ def edsm_data(event):
             data.update({'type': body['subType']})
             this.scanned_worlds['bodies'][body['name']] = data
 
+    if len(this.stars['name']) > 0:
+        this.starused_label['text'] = 'Star used: ['+str(this.istar+1)+'/'+str(len(this.stars['name']))+']'
+        updateValues(this.stars['solarRadius'][this.istar],this.stars['surfaceTemperature'][this.istar],this.stars['name'][this.istar])
+
     # Display
-    systemName = this.edsm_data.get('name', '')
+    systemName = this.edsm_data.get('name', this.scanned_worlds['system'])
     url = 'https://www.edsm.net/show-system?systemName=%s&bodyName=ALL' % quote(systemName)
     for i in range(len(WORLDS)):
         (name, high, low, subType) = WORLDS[i]
@@ -280,23 +343,28 @@ def edsm_data(event):
 def get_setting():
     setting = config.getint('habzone')
     if setting == 0:
-        return SETTING_DEFAULT	# Default to Earth-Like
+        return SETTING_DEFAULT  # Default to Earth-Like
     elif setting == SETTING_NONE:
-        return 0	# Explicitly set by the user to display nothing
+        return 0    # Explicitly set by the user to display nothing
     else:
         return setting
+
 
 def update_visibility():
     setting = get_setting()
     row = 1
+    this.starused_label.grid(row = row, column = 0, sticky=tk.W)
+    this.starused.grid(row = row, column = 1, columnspan=3, sticky=tk.W)
+    this.starused_prev.grid(row = row, column = 4, sticky=tk.E)
+    this.starused_next.grid(row = row, column = 5, sticky=tk.E)
     for (label, edsm, near, dash, far, ls) in this.worlds:
         if setting & row:
-            label.grid(row = row, column = 0, sticky=tk.W)
-            edsm.grid(row = row, column = 1, sticky=tk.W, padx = (0,10))
-            near.grid(row = row, column = 2, sticky=tk.E)
-            dash.grid(row = row, column = 3, sticky=tk.E)
-            far.grid(row = row, column = 4, sticky=tk.E)
-            ls.grid(row = row, column = 5, sticky=tk.W)
+            label.grid(row = row+1, column = 0, sticky=tk.W)
+            edsm.grid(row = row+1, column = 1, sticky=tk.E)
+            near.grid(row = row+1, column = 2, sticky=tk.E)
+            dash.grid(row = row+1, column = 3, sticky=tk.E)
+            far.grid(row = row+1, column = 4, sticky=tk.E)
+            ls.grid(row = row+1, column = 5, sticky=tk.E)
         else:
             label.grid_remove()
             edsm.grid_remove()
@@ -309,3 +377,17 @@ def update_visibility():
         this.spacer.grid_remove()
     else:
         this.spacer.grid(row = 0)
+
+def next_star(event):
+    this.istar+=1
+    if this.istar >= len(this.stars['name']):
+        this.istar=0
+    this.starused_label['text'] = 'Star used: ['+str(this.istar+1)+'/'+str(len(this.stars['name']))+']'
+    updateValues(this.stars['solarRadius'][this.istar],this.stars['surfaceTemperature'][this.istar],this.stars['name'][this.istar])
+
+def prev_star(event):
+    this.istar-=1
+    if this.istar < 0:
+        this.istar=len(this.stars['name'])-1
+    this.starused_label['text'] = 'Star used: ['+str(this.istar+1)+'/'+str(len(this.stars['name']))+']'
+    updateValues(this.stars['solarRadius'][this.istar],this.stars['surfaceTemperature'][this.istar],this.stars['name'][this.istar])
