@@ -9,6 +9,7 @@ from collections import defaultdict
 import requests
 import sys
 import threading
+# Python 2 deprecated
 from urllib.parse import quote
 import tkinter as tk
 
@@ -21,7 +22,7 @@ if __debug__:
 from config import config
 from l10n import Locale
 
-VERSION = '1.20'
+VERSION = '1.30'
 
 SETTING_DEFAULT = 0x0002  # Earth-like
 SETTING_EDSM    = 0x1000
@@ -37,6 +38,14 @@ WORLDS = [
     ('Terraformable',  318.0,  223.0, 'terraformable'),
     ('Organic',        500.0,  200.0, 'Organic POI'),
 ]
+# Journal planet type to EDSM planet type
+JRNL2TYPE = {
+    'Earthlike body':'Earth-like world',
+    'Water world':'Water world',
+    'Ammonia world':'Ammonia world',
+    'Metal rich body':'Metal-rich body',
+    'Sudarsky class II gas giant':'Class II gas giant'
+}
 
 LS = 300000000.0  # 1 ls in m (approx)
 
@@ -159,16 +168,11 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
             body_type = None
             if entry.get('TerraformState') == 'Terraformable':
                 body_type = 'terraformable'
-            elif entry.get('PlanetClass') == 'Earthlike body':
-                body_type = 'Earth-like world'
-            elif entry.get('PlanetClass') == 'Water world':
-                body_type = 'Water world'
-            elif entry.get('PlanetClass') == 'Ammonia world':
-                body_type = 'Ammonia world'
-            elif entry.get('PlanetClass') == 'Metal rich body':
-                body_type = 'Metal-rich body'
-            elif entry.get('PlanetClass') == 'Sudarsky class II gas giant':
-                body_type = 'Class II gas giant'
+            else:
+                try:
+                    body_type = JRNL2TYPE[entry.get('PlanetClass')]
+                except:
+                    pass
             if body_type:
                 data = this.scanned_worlds['bodies'].get(entry.get('BodyName'), {})
                 data.update({'type': body_type, 'was_mapped': mapped})
