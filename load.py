@@ -40,6 +40,9 @@ if __debug__:
 
 from config import config
 from l10n import Locale
+from EDMCLogging import get_main_logger
+
+logger = get_main_logger()
 
 VERSION = '1.30'
 
@@ -71,7 +74,7 @@ LS = 300000000.0  # 1 ls in m (approx)
 this = sys.modules[__name__]  # For holding module globals
 this.frame = None
 this.worlds = []
-this.scanned_worlds = {'system': None, 'bodies': {}}
+this.scanned_worlds = {'system': None, 'bodies': []}
 this.edsm_session = None
 this.edsm_data = None
 
@@ -184,18 +187,16 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
         if entry.get('TerraformState', False) or (entry.get('PlanetClass', False)):
             mapped = entry.get('WasMapped')
             # TODO: Clean up repetitive code - perhaps integrate Journal types into WORLDS constant?
-            body_type = None
+            try:
+                body_type = JRNL2TYPE[entry.get('PlanetClass')]
+                data = {'name': entry.get('BodyName'), 'type': body_type, 'was_mapped': mapped}
+                this.scanned_worlds['bodies'].append(data)
+            except:
+                pass
             if entry.get('TerraformState') == 'Terraformable':
                 body_type = 'terraformable'
-            else:
-                try:
-                    body_type = JRNL2TYPE[entry.get('PlanetClass')]
-                except:
-                    pass
-            if body_type:
-                data = this.scanned_worlds['bodies'].get(entry.get('BodyName'), {})
-                data.update({'type': body_type, 'was_mapped': mapped})
-                this.scanned_worlds['bodies'][entry.get('BodyName')] = data
+                data = {'name': entry.get('BodyName'), 'type': body_type, 'was_mapped': mapped}
+                this.scanned_worlds['bodies'].append(data)
             list_bodies(system)
 
     if entry['event'] in ['Location', 'FSDJump', 'StartUp']:
@@ -217,10 +218,10 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
         this.scanned_worlds['bodies'].clear()
 
     if entry['event'] == 'SAAScanComplete':
-        for name in this.scanned_worlds['bodies']:
-            print('Scan Name: ' + name + ' | ' + entry['BodyName'])
-            if name == entry['BodyName']:
-                this.scanned_worlds['bodies'][name].update({'mapped': True})
+        for body in this.scanned_worlds['bodies']:
+            logger.trace('Scan Name: ' + body['name'] + ' | ' + entry['BodyName'])
+            if body['name'] == entry['BodyName']:
+                body.update({'mapped': True})
         list_bodies(system)
 
     if entry['event'] in ['Location', 'FSDJump', 'StartUp'] and get_setting() & SETTING_EDSM:
@@ -285,16 +286,16 @@ def updateValues(r,t,name):
 
 def list_bodies(system):
     body_data = {}
-    for name in this.scanned_worlds['bodies']:
-        if this.scanned_worlds['bodies'][name].get('type', False):
-            final_name = name
-            if this.scanned_worlds['bodies'][name].get('was_mapped', False):
+    for body in this.scanned_worlds['bodies']:
+        if body.get('type', False):
+            final_name = body.get('name')
+            if body.get('was_mapped', False):
                 final_name += u'⍻'
-            elif this.scanned_worlds['bodies'][name].get('mapped', False):
+            elif body.get('mapped', False):
                 final_name += u'🗸'
-            data = body_data.get(this.scanned_worlds['bodies'][name]['type'], [])
+            data = body_data.get(body['type'], [])
             data.append(final_name)
-            body_data[this.scanned_worlds['bodies'][name]['type']] = data
+            body_data[body['type']] = data
     for i in range(len(WORLDS)):
         (name, high, low, subType) = WORLDS[i]
         (label, edsm, near, dash, far, ls) = this.worlds[i]
@@ -339,14 +340,23 @@ def edsm_data(event):
                 this.stars['solarRadius'].append(body['solarRadius']*695500000)
 
         this.bodies[body['subType']].append(body['name'])
+        exists = False
         if body.get('terraformingState') == 'Candidate for terraforming':
-            data = this.scanned_worlds['bodies'].get(body['name'], {})
-            data.update({'type': 'terraformable'})
-            this.scanned_worlds['bodies'][body['name']] = data
-        else:
-            data = this.scanned_worlds['bodies'].get(body['name'], {})
-            data.update({'type': body['subType']})
-            this.scanned_worlds['bodies'][body['name']] = data
+            for scannedBody in this.scanned_worlds['bodies']:
+                if scannedBody['name'] is body['name'] and scannedBody['type'] is 'terraformable':
+                    exists = True
+            if not exists:
+                this.scanned_worlds['bodies'].append({'name': body['name'], 'type': 'terraformable'})
+
+        for i in range(len(WORLDS)):
+            (name, high, low, subType) = WORLDS[i]
+            exists = False
+            if body['subType'][0:5] == subType[0:5]:
+                for scannedBody in this.scanned_worlds['bodies']:
+                    if scannedBody['name'] is body['name'] and scannedBody['type'] is body['subType']:
+                        exists = True
+                if not exists:
+                    this.scanned_worlds['bodies'].append({'name': body['name'], 'type': body['subType']})
 
     if len(this.stars['name']) > 0:
         this.starused_label['text'] = 'Star used: ['+str(this.istar+1)+'/'+str(len(this.stars['name']))+']'
@@ -364,7 +374,7 @@ def edsm_data(event):
 
 
 def get_setting():
-    setting = config.getint('habzone')
+    setting = config.get_int('habzone')
     if setting == 0:
         return SETTING_DEFAULT  # Default to Earth-Like
     elif setting == SETTING_NONE:
