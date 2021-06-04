@@ -190,13 +190,25 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
             try:
                 body_type = JRNL2TYPE[entry.get('PlanetClass')]
                 data = {'name': entry.get('BodyName'), 'type': body_type, 'was_mapped': mapped}
-                this.scanned_worlds['bodies'].append(data)
+                exists = False
+                for scannedBody in this.scanned_worlds['bodies']:
+                    if scannedBody['name'] is entry.get('BodyName') and scannedBody['type'] is body_type:
+                        exists = True
+                        scannedBody.update({'was_mapped': mapped})
+                if not exists:
+                    this.scanned_worlds['bodies'].append(data)
             except:
                 pass
             if entry.get('TerraformState') == 'Terraformable':
                 body_type = 'terraformable'
                 data = {'name': entry.get('BodyName'), 'type': body_type, 'was_mapped': mapped}
-                this.scanned_worlds['bodies'].append(data)
+                exists = False
+                for scannedBody in this.scanned_worlds['bodies']:
+                    if scannedBody['name'] is entry.get('BodyName') and scannedBody['type'] is body_type:
+                        exists = True
+                        scannedBody.update({'was_mapped': mapped})
+                if not exists:
+                    this.scanned_worlds['bodies'].append(data)
             list_bodies(system)
 
     if entry['event'] in ['Location', 'FSDJump', 'StartUp']:
