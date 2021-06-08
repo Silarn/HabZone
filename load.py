@@ -192,7 +192,7 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
                 data = {'name': entry.get('BodyName'), 'type': body_type, 'was_mapped': mapped}
                 exists = False
                 for scannedBody in this.scanned_worlds['bodies']:
-                    if scannedBody['name'] is entry.get('BodyName') and scannedBody['type'] is body_type:
+                    if scannedBody['name'] == entry.get('BodyName') and scannedBody['type'] == body_type:
                         exists = True
                         scannedBody.update({'was_mapped': mapped})
                 if not exists:
@@ -204,7 +204,7 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
                 data = {'name': entry.get('BodyName'), 'type': body_type, 'was_mapped': mapped}
                 exists = False
                 for scannedBody in this.scanned_worlds['bodies']:
-                    if scannedBody['name'] is entry.get('BodyName') and scannedBody['type'] is body_type:
+                    if scannedBody['name'] == entry.get('BodyName') and scannedBody['type'] == body_type:
                         exists = True
                         scannedBody.update({'was_mapped': mapped})
                 if not exists:
@@ -355,7 +355,7 @@ def edsm_data(event):
         exists = False
         if body.get('terraformingState') == 'Candidate for terraforming':
             for scannedBody in this.scanned_worlds['bodies']:
-                if scannedBody['name'] is body['name'] and scannedBody['type'] is 'terraformable':
+                if scannedBody['name'] == body['name'] and scannedBody['type'] == 'terraformable':
                     exists = True
             if not exists:
                 this.scanned_worlds['bodies'].append({'name': body['name'], 'type': 'terraformable'})
@@ -365,7 +365,7 @@ def edsm_data(event):
             exists = False
             if body['subType'][0:5] == subType[0:5]:
                 for scannedBody in this.scanned_worlds['bodies']:
-                    if scannedBody['name'] is body['name'] and scannedBody['type'] is body['subType']:
+                    if scannedBody['name'] == body['name'] and scannedBody['type'] == body['subType']:
                         exists = True
                 if not exists:
                     this.scanned_worlds['bodies'].append({'name': body['name'], 'type': body['subType']})
